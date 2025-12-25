@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools >= 61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "eplb"
+version = "1.0.0"
+description = "Expert Parallelism Load Balancer for MoE models"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "DeepSeek-AI", email = "service@deepseek.com"},
+]
+keywords = ["deep-learning", "moe", "expert-parallelism", "load-balancing", "pytorch"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.8"
+dependencies = [
+    "torch >= 1.10.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/deepseek-ai/EPLB"
+Repository = "https://github.com/deepseek-ai/EPLB"
+Issues = "https://github.com/deepseek-ai/EPLB/issues"
+
+[tool.setuptools]
+py-modules = ["eplb"]
