@@ -1,6 +1,15 @@
+"""
+Expert Parallelism Load Balancer (EPLB)
+
+A load balancing algorithm for expert parallelism in MoE (Mixture of Experts) models.
+Implements redundant expert strategy with hierarchical and global load balancing policies.
+"""
+
 from typing import Tuple
 
 import torch
+
+__version__ = "1.0.0"
 
 def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor, torch.Tensor]:
     """
@@ -161,4 +170,10 @@ def rebalance_experts(weight: torch.Tensor, num_replicas: int, num_groups: int,
             torch.arange(num_replicas, dtype=torch.int64, device=log2phy.device).expand(num_layers, -1))
     return phy2log, log2phy, logcnt
 
-__all__ = ['rebalance_experts']
+__all__ = [
+    "__version__",
+    "rebalance_experts",
+    "rebalance_experts_hierarchical",
+    "balanced_packing",
+    "replicate_experts",
+]
