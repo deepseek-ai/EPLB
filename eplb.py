@@ -1,8 +1,18 @@
+"""
+Expert Parallelism Load Balancer (EPLB)
+
+A load balancing algorithm for expert parallelism in MoE (Mixture of Experts) models.
+Implements redundant expert strategy with hierarchical and global load balancing policies.
+"""
+
 from typing import Tuple
 
 import torch
 
-def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor, torch.Tensor]:
+__version__ = "1.0.0"
+
+def balanced_packing(weight: torch.Tensor, num_packs: int,
+                     item_ids: torch.Tensor = None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Pack n weighted objects to m packs, such that each bin contains exactly n/m objects and the weights of all packs
     are as balanced as possible.
@@ -10,8 +20,9 @@ def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor
     Parameters:
         weight: [X, n], the weight of each item
         num_packs: number of packs
-    
-    Returns: 
+        item_ids: [X, n], optional item IDs - items with same ID won't be placed in same pack
+
+    Returns:
         pack_index: [X, n], the pack index of each item
         rank_in_pack: [X, n], the rank of the item in the pack
     """
@@ -27,17 +38,37 @@ def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor
     indices = weight.float().sort(-1, descending=True).indices.cpu()
     pack_index = torch.full_like(weight, fill_value=-1, dtype=torch.int64, device='cpu')
     rank_in_pack = torch.full_like(pack_index, fill_value=-1)
+
+    if item_ids is not None:
+        item_ids = item_ids.cpu()
+
     for i in range(num_layers):
         pack_weights = [0] * num_packs
         pack_items = [0] * num_packs
+        pack_ids = [set() for _ in range(num_packs)] if item_ids is not None else None
+
         for group in indices[i]:
-            pack = min((i for i in range(num_packs) if pack_items[i] < groups_per_pack), 
-                       key=pack_weights.__getitem__)
+            group_id = item_ids[i, group].item() if item_ids is not None else None
+
+            # Find eligible packs (not full and doesn't contain this item_id)
+            if item_ids is not None:
+                eligible = [p for p in range(num_packs)
+                           if pack_items[p] < groups_per_pack and group_id not in pack_ids[p]]
+                if not eligible:
+                    # Fallback if no eligible pack (constraints may be unsatisfiable)
+                    eligible = [p for p in range(num_packs) if pack_items[p] < groups_per_pack]
+            else:
+                eligible = [p for p in range(num_packs) if pack_items[p] < groups_per_pack]
+
+            pack = min(eligible, key=pack_weights.__getitem__)
             assert pack_items[pack] < groups_per_pack
             pack_index[i, group] = pack
             rank_in_pack[i, group] = pack_items[pack]
             pack_weights[pack] += weight[i, group]
             pack_items[pack] += 1
+            if pack_ids is not None:
+                pack_ids[pack].add(group_id)
+
     return pack_index, rank_in_pack
 
 
@@ -114,8 +145,9 @@ def rebalance_experts_hierarchical(weight: torch.Tensor, num_physical_experts: i
 
     # Step 3: pack physical_experts to GPUs
     # [num_layers * num_nodes, num_physical_experts // num_nodes]
+    # Pass phy2mlog as item_ids to prevent duplicate logical experts on the same GPU
     tokens_per_phy = (tokens_per_mlog / mlogcnt).gather(-1, phy2mlog)
-    pack_index, rank_in_pack = balanced_packing(tokens_per_phy, num_gpus // num_nodes)
+    pack_index, rank_in_pack = balanced_packing(tokens_per_phy, num_gpus // num_nodes, item_ids=phy2mlog)
     phy2pphy = pack_index * phy_experts_per_gpu + rank_in_pack
     pphy2phy = inverse(phy2pphy)
 
@@ -161,4 +193,10 @@ def rebalance_experts(weight: torch.Tensor, num_replicas: int, num_groups: int,
             torch.arange(num_replicas, dtype=torch.int64, device=log2phy.device).expand(num_layers, -1))
     return phy2log, log2phy, logcnt
 
-__all__ = ['rebalance_experts']
+__all__ = [
+    "__version__",
+    "rebalance_experts",
+    "rebalance_experts_hierarchical",
+    "balanced_packing",
+    "replicate_experts",
+]
