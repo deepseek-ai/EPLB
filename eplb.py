@@ -1,8 +1,9 @@
-from typing import Tuple
+from typing import Optional, Tuple
 
 import torch
 
-def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor, torch.Tensor]:
+def balanced_packing(weight: torch.Tensor, num_packs: int,
+                     logical_ids: Optional[torch.Tensor] = None) -> Tuple[torch.Tensor, torch.Tensor]:
     """
     Pack n weighted objects to m packs, such that each bin contains exactly n/m objects and the weights of all packs
     are as balanced as possible.
@@ -10,8 +11,10 @@ def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor
     Parameters:
         weight: [X, n], the weight of each item
         num_packs: number of packs
-    
-    Returns: 
+        logical_ids: [X, n], optional logical id per item; if provided, items with the same
+                     logical id will not be placed in the same pack when possible
+
+    Returns:
         pack_index: [X, n], the pack index of each item
         rank_in_pack: [X, n], the rank of the item in the pack
     """
@@ -25,19 +28,29 @@ def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor
         return pack_index, rank_in_pack
 
     indices = weight.float().sort(-1, descending=True).indices.cpu()
+    logical_ids_cpu = logical_ids.cpu() if logical_ids is not None else None
     pack_index = torch.full_like(weight, fill_value=-1, dtype=torch.int64, device='cpu')
     rank_in_pack = torch.full_like(pack_index, fill_value=-1)
     for i in range(num_layers):
         pack_weights = [0] * num_packs
         pack_items = [0] * num_packs
+        pack_logicals = [set() for _ in range(num_packs)] if logical_ids_cpu is not None else None
         for group in indices[i]:
-            pack = min((i for i in range(num_packs) if pack_items[i] < groups_per_pack), 
-                       key=pack_weights.__getitem__)
+            logical_id = logical_ids_cpu[i, group].item() if logical_ids_cpu is not None else None
+            available_packs = [p for p in range(num_packs) if pack_items[p] < groups_per_pack]
+            if logical_id is not None:
+                # Prefer packs that don't already have this logical expert
+                constrained_packs = [p for p in available_packs if logical_id not in pack_logicals[p]]
+                if constrained_packs:
+                    available_packs = constrained_packs
+            pack = min(available_packs, key=pack_weights.__getitem__)
             assert pack_items[pack] < groups_per_pack
             pack_index[i, group] = pack
             rank_in_pack[i, group] = pack_items[pack]
             pack_weights[pack] += weight[i, group]
             pack_items[pack] += 1
+            if pack_logicals is not None:
+                pack_logicals[pack].add(logical_id)
     return pack_index, rank_in_pack
 
 
@@ -115,7 +128,7 @@ def rebalance_experts_hierarchical(weight: torch.Tensor, num_physical_experts: i
     # Step 3: pack physical_experts to GPUs
     # [num_layers * num_nodes, num_physical_experts // num_nodes]
     tokens_per_phy = (tokens_per_mlog / mlogcnt).gather(-1, phy2mlog)
-    pack_index, rank_in_pack = balanced_packing(tokens_per_phy, num_gpus // num_nodes)
+    pack_index, rank_in_pack = balanced_packing(tokens_per_phy, num_gpus // num_nodes, logical_ids=phy2mlog)
     phy2pphy = pack_index * phy_experts_per_gpu + rank_in_pack
     pphy2phy = inverse(phy2pphy)
 
