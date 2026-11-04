@@ -145,6 +145,8 @@ def rebalance_experts(weight: torch.Tensor, num_replicas: int, num_groups: int,
         logical_to_physical_map: [layers, num_logical_experts, X], the replica indices for each expert
         expert_count: [layers, num_logical_experts], number of physical replicas for each logical expert
     """
+    if num_nodes <= 0 or num_gpus <= 0 or num_gpus % num_nodes != 0:
+        raise ValueError("num_nodes and num_gpus must be positive, and num_gpus must be a multiple of num_nodes")
     num_layers, num_logical_experts = weight.shape
     weight = weight.float().cpu()
     if num_groups % num_nodes == 0:
