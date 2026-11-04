@@ -134,7 +134,7 @@ def rebalance_experts(weight: torch.Tensor, num_replicas: int, num_groups: int,
     Entry point for expert-parallelism load balancer.
 
     Parameters:
-        weight: [layers, num_logical_experts], the load statistics for all logical experts
+        weight: [layers, num_logical_experts], finite non-negative load statistics for all logical experts
         num_replicas: number of physical experts, must be a multiple of `num_gpus`
         num_groups: number of expert groups
         num_nodes: number of server nodes, where the intra-node network (e.g, NVLink) is faster
@@ -147,6 +147,8 @@ def rebalance_experts(weight: torch.Tensor, num_replicas: int, num_groups: int,
     """
     num_layers, num_logical_experts = weight.shape
     weight = weight.float().cpu()
+    if not (torch.isfinite(weight) & (weight >= 0)).all():
+        raise ValueError("expert loads must be finite and non-negative after float32 conversion")
     if num_groups % num_nodes == 0:
         # use hierarchical load-balance policy
         phy2log, phyrank, logcnt = rebalance_experts_hierarchical(weight, num_replicas, 
