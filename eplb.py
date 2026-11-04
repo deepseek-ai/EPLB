@@ -1,3 +1,4 @@
+from array import array
 from typing import Tuple
 
 import torch
@@ -25,6 +26,31 @@ def balanced_packing(weight: torch.Tensor, num_packs: int) -> Tuple[torch.Tensor
         return pack_index, rank_in_pack
 
     indices = weight.float().sort(-1, descending=True).indices.cpu()
+
+    # The public entry point uses CPU float32 weights. Avoid indexing and
+    # adding zero-dimensional tensors for every item while preserving the
+    # original float32 rounding and tie-breaking of pack weights.
+    if weight.device.type == 'cpu' and weight.dtype == torch.float32:
+        values = weight.tolist()
+        pack_indices = []
+        ranks = []
+        for row, order in zip(values, indices.tolist()):
+            pack_weights = array('f', [0.0]) * num_packs
+            pack_items = [0] * num_packs
+            row_packs = [-1] * num_groups
+            row_ranks = [-1] * num_groups
+            for group in order:
+                pack = min((i for i in range(num_packs) if pack_items[i] < groups_per_pack),
+                           key=pack_weights.__getitem__)
+                row_packs[group] = pack
+                row_ranks[group] = pack_items[pack]
+                pack_weights[pack] += row[group]
+                pack_items[pack] += 1
+            pack_indices.append(row_packs)
+            ranks.append(row_ranks)
+        return (torch.tensor(pack_indices, dtype=torch.int64, device='cpu').reshape(num_layers, num_groups),
+                torch.tensor(ranks, dtype=torch.int64, device='cpu').reshape(num_layers, num_groups))
+
     pack_index = torch.full_like(weight, fill_value=-1, dtype=torch.int64, device='cpu')
     rank_in_pack = torch.full_like(pack_index, fill_value=-1)
     for i in range(num_layers):
